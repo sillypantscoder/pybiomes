@@ -4,19 +4,51 @@ import math
 from intersecting_squares import get_intersecting_unit_squares as _get_intersecting_unit_squares
 import os
 
-class CFileLock:
+class BiomeFinderProcess(typing.TypedDict):
+	process: subprocess.Popen[bytes]
+	claimed: bool
+
+class SubprocessManager:
 	def __init__(self):
 		fn = f"biome_finder_out_{round(os.times().elapsed*100)}.out"
-		self.filename: str | None = fn
+		self.out_filename: str | None = fn
 		subprocess.run(["cp", "../example_find_biome_at.c", "./example_find_biome_at.c"], cwd=os.path.join(os.getcwd(), "cubiomes"))
 		subprocess.run(["gcc", "example_find_biome_at.c", "libcubiomes.a", "-fwrapv", "-lm", "-o", "../"+fn], cwd=os.path.join(os.getcwd(), "cubiomes"))
 		subprocess.run(["rm", "example_find_biome_at.c"], cwd=os.path.join(os.getcwd(), "cubiomes"))
+		# process list
+		self.processes: list[BiomeFinderProcess] = []
+	def getProcess(self):
+		for p in self.processes:
+			if p["claimed"] == False:
+				p["claimed"] = True
+				# print(f"claimed process #{self.processes.index(p)+1}")
+				return p["process"]
+		return self.newProcess()
+	def newProcess(self):
+		if self.out_filename == None: raise AssertionError("Cannot create new processes after subprocess manager is deleted")
+		p = subprocess.Popen(["./" + self.out_filename], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+		self.processes.append({ "process": p, "claimed": True })
+		# print(f"created and claimed process #{len(self.processes)}")
+		return p
+	def garbageCollectProcess(self, process: subprocess.Popen[bytes]):
+		for p in self.processes:
+			if p["process"] == process:
+				p["claimed"] = False
+				# print(f"un-claimed process #{self.processes.index(p)+1}")
 	def __del__(self):
-		if self.filename == None: return
-		print("[deleting temporary out file]")
-		os.remove(self.filename)
-		self.filename = None
-_out_file = CFileLock()
+		if self.out_filename == None: return
+		print(f"[deleting temporary out file]")
+		os.remove(self.out_filename)
+		self.out_filename = None
+		print(f"[killing {len(self.processes)} processes]")
+		for p in self.processes:
+			proc = p["process"]
+			if proc.stdin == None: raise AssertionError("stdin is missing??? you have problems!")
+			proc.stdin.write(b"0 ")
+			proc.stdin.flush()
+			proc.wait()
+		self.processes = []
+manager = SubprocessManager()
 
 class PosXZ:
 	def __init__(self, x: int, z: int):
@@ -42,9 +74,9 @@ class Structure:
 
 class MCWorld:
 	def __init__(self, seed: int, dimension: typing.Literal[-1, 0, 1]):
-		if _out_file.filename == None: raise AssertionError("biome finder file is missing!")
-		self.p: subprocess.Popen[bytes] | None = subprocess.Popen(["./" + _out_file.filename], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+		self.p: subprocess.Popen[bytes] | None = manager.getProcess()
 		# write seed, dimension
+		self.send(1)
 		self.send(seed)
 		self.send(dimension)
 
@@ -62,14 +94,14 @@ class MCWorld:
 		return line
 
 	def getBiomeAt(self, blockPos: PosXZ):
-		self.send(1)
+		self.send(2)
 		self.send(blockPos.x)
 		self.send(blockPos.z)
 		biome = self.readline()
 		return biome.decode("UTF-8")
 
 	def getSpawnPoint(self):
-		self.send(2)
+		self.send(3)
 		x = int(self.readline())
 		z = int(self.readline())
 		return PosXZ(x, z)
@@ -77,7 +109,7 @@ class MCWorld:
 	def getStructuresInRegion(self, regionX: int, regionZ: int):
 		"""Get all the structures between (regionX*512, regionZ*512) and ((regionX+1)*512, (regionZ+1)*512)."""
 		structures: list[Structure] = []
-		self.send(3)
+		self.send(4)
 		self.send(regionX)
 		self.send(regionZ)
 		structType = self.readline()
@@ -91,7 +123,7 @@ class MCWorld:
 	def getStructuresInRegionsMatching(self, regions: list[PosXZ], filter: typing.Callable[[ Structure ], bool]):
 		structures: list[Structure] = []
 		for r in regions:
-			self.send(3)
+			self.send(4)
 			self.send(r.x)
 			self.send(r.z)
 			structType = self.readline()
@@ -112,71 +144,20 @@ class MCWorld:
 
 	def discard(self):
 		if self.p == None: return
-		try:
-			self.send(0)
-			self.p.wait()
-			self.p = None
-		except BrokenPipeError:
-			# subprocess is killed if the user presses ctrl-c.
-			# so it's probably fine.
-			print("[broken pipe from MCWorld]")
+		manager.garbageCollectProcess(self.p)
+		self.p = None
 
 	def __del__(self):
 		self.discard()
 
 if __name__ == "__main__":
-	seed = 300000
-	end_seed = 350000
-	done = False
-	information = []
-	interesting = False
-	while not done:
-		# print information
-		if interesting: print(*information, sep="")
-		information = [f"for seed: {seed}"]
-		interesting = False
-		if seed > end_seed: done = True
-		# make world
-		seed += 1
-		world = MCWorld(seed, 0)
-		# spawn point
-		spawnPos = world.getSpawnPoint()
-		dist = spawnPos.length()
-		# print(f"[Spawn:{spawnPos.x} {spawnPos.z} {round(dist)}]", end="")
-		if dist > 20:
-			information.append(f" - spawn failed ({round(dist)})")
-			continue
-		else:
-			information.append(f" - spawn success ({round(dist)})")
-		# biomes
-		# positions = [PosXZ(-35, -35), PosXZ(35, -35), PosXZ(-35, 35), PosXZ(35, 35)]
-		# biome_count = 0
-		# for pos in positions:
-		# 	biome = world.getBiomeAt(pos)
-		# 	if biome == "cherry_grove":
-		# 		biome_count += 1
-		# if biome_count < len(positions):
-		# 	print(f" - biomes failed ({biome_count})")
-		# 	continue
-		# else:
-		# 	print(f" - biomes success ({biome_count})", end="")
-		# structures
-		structures = world.getStructuresInRadius(spawnPos, 75)
-		correct = 0
-		for s in structures:
-			if s.typeID == "village":
-				correct += 1
-		if correct > 0: interesting = True
-		if correct < 3:
-			information.append(f" - structures failed ({correct})")
-			continue
-		else:
-			information.append(f" - structures success ({correct})")
-		# finish
-		done = True
-		interesting = True
-		print()
-	# print last information
-	print("Finished", "(interesting)" if interesting else "(boring)", "at seed", seed)
-	if interesting:
-		print(*information, sep="")
+	import threading
+	seeds: dict[int, str | None] = { i: None for i in range(10000) }
+	def doSomethingClever(seed: int):
+		world1 = MCWorld(0, 0)
+		biome = world1.getBiomeAt(PosXZ(seed, 0))
+		seeds[seed] = biome
+	for i in range(10000): threading.Thread(target=doSomethingClever, name=f"asdf{i}", args=(i, )).start()
+	import time
+	while None in [*seeds.values()]: time.sleep(0.01)
+	print("it totally finished! (wow!)")

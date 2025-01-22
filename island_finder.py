@@ -7,42 +7,33 @@ for x in [-biome_test_dist, 0, biome_test_dist]:
 		if x == 0 and z == 0: continue
 		biome_test_positions.append(mc.PosXZ(x, z))
 
-seed =      8000000
-end_seed = 12000000
-while seed <= end_seed:
-	if seed % 1000 == 0: print(f"[checked {seed} seeds...]")
-	seed += 1
-	# make world
-	world = mc.MCWorld(seed, 0)
-	# spawn point
-	spawnPos = world.getSpawnPoint()
-	dist = spawnPos.length()
-	# print(f"[Spawn:{spawnPos.x} {spawnPos.z} {round(dist)}]", end="")
-	if dist > 30: continue
-	# biomes
-	valid = True
-	for pos in biome_test_positions:
-		biome = world.getBiomeAt(pos)
-		if "ocean" not in biome:
-			valid = False
-			break
-		if "frozen" in biome:
-			valid = False
-			break
-	if not valid: continue
-	# structures
-	structures = world.getStructuresInRadius(mc.PosXZ(0, 0), 100)
-	correctStructs: list[mc.PosXZ] = []
-	for s in structures:
-		if s.typeID == "village":
-			correctStructs.append(s.pos)
-	if len(correctStructs) <= 0: continue
-	# finish
-	f = open("seeds.txt", "a")
-	f.write(f"\n\n\n\nFound possible island!!! for seed: {seed}\n")
-	for pos in biome_test_positions:
-		biome = world.getBiomeAt(pos)
-		f.write(f"- X: {pos.x} Z: {pos.z} Biome: {biome}\n")
-	for pos in correctStructs:
-		f.write(f"- Village at X: {pos.x} Z: {pos.z}\n")
-	f.close()
+class IslandSeedFinder(mc.SeedFinder):
+	def __init__(self, start_seed: int, end_seed: int):
+		super().__init__(start_seed, end_seed)
+		self.confirm = "possible village island spawn"
+	def is_seed_good(self, world: mc.MCWorld):
+		# biomes
+		for pos in biome_test_positions:
+			biome = world.getBiomeAt(pos)
+			if "ocean" not in biome:
+				return None
+			if "frozen" in biome:
+				return None
+		# spawn point
+		spawnPos = world.getSpawnPoint()
+		dist = spawnPos.length()
+		if dist > 30: return None
+		# structures
+		structures = world.getStructuresInRadius(mc.PosXZ(0, 0), 100)
+		correctStructs: list[mc.PosXZ] = []
+		for s in structures:
+			if s.typeID == "village":
+				correctStructs.append(s.pos)
+		if len(correctStructs) <= 0: return None
+		# yay
+		return "It worked"
+
+seed =     13000000
+end_seed = 13001000
+finder = IslandSeedFinder(seed, end_seed)
+finder.run()

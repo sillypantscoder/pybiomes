@@ -3,6 +3,10 @@ import typing
 import math
 from intersecting_squares import get_intersecting_unit_squares as _get_intersecting_unit_squares
 import os
+import datetime
+import threading
+import multiprocessing
+import time
 
 class BiomeFinderProcess(typing.TypedDict):
 	process: subprocess.Popen[bytes]
@@ -150,14 +154,91 @@ class MCWorld:
 	def __del__(self):
 		self.discard()
 
-if __name__ == "__main__":
-	import threading
-	seeds: dict[int, str | None] = { i: None for i in range(10000) }
-	def doSomethingClever(seed: int):
-		world1 = MCWorld(0, 0)
-		biome = world1.getBiomeAt(PosXZ(seed, 0))
-		seeds[seed] = biome
-	for i in range(10000): threading.Thread(target=doSomethingClever, name=f"asdf{i}", args=(i, )).start()
-	import time
-	while None in [*seeds.values()]: time.sleep(0.01)
-	print("it totally finished! (wow!)")
+class SeedFinder:
+	def __init__(self, start_seed: int, end_seed: int):
+		self.start_seed = start_seed
+		self.end_seed = end_seed
+		self.confirm = "something"
+		self.seeds_checked = 0
+		self.seeds_checked_checkpoint = 0
+	def run(self):
+		start_time = datetime.datetime.now()
+		# Make seed list
+		seeds: list[int] = []
+		seed = self.start_seed
+		while seed <= self.end_seed:
+			seeds.append(seed)
+			seed += 1
+		# Run all the checkers
+		pool = multiprocessing.Pool(processes=14)
+		pool.map(self.check_seed, seeds)
+		pool.close()
+		# Times
+		end_time = datetime.datetime.now()
+		diff = (end_time - start_time).total_seconds()
+		ms_per_seed = 1000 * diff / (self.end_seed - self.start_seed)
+		print(f"Total time (seconds): {diff}")
+		print(f"Average ms per seed: {ms_per_seed}")
+		print(f"Average seeds per second: {1000/ms_per_seed}")
+	def check_seed(self, seed: int):
+		# make world
+		world = MCWorld(seed, 0)
+		# check the seed
+		valid = False
+		try:
+			valid = self.is_seed_good(world)
+		except KeyboardInterrupt:
+			return
+		if valid != None:
+			# save this!
+			f = open("seeds.txt", "a")
+			f.write(f"\n\n\n\nFound {self.confirm} for seed: {seed}\n")
+			f.write(f"data: {valid}")
+			f.close()
+			print(f"[found result for seed: {seed}]")
+		# seed checkpoints
+		if seed % 20000 == 0: print(f"[finished checking seed: {seed}, probably about {round(100*(seed - self.start_seed)/(self.end_seed - self.start_seed))}% done?]")
+	def is_seed_good(self, world: MCWorld) -> str | None:
+		return None
+
+
+class _SeedFinder_Old: # type: ignore
+	def __init__(self, start_seed: int, end_seed: int):
+		self.start_seed = start_seed
+		self.seed = start_seed
+		self.end_seed = end_seed
+		self.confirm = "something"
+		self.threads_alive = 0
+	def run(self):
+		start_time = datetime.datetime.now()
+		while self.seed <= self.end_seed:
+			# We don't want too many threads. (That might cause problems.)
+			while self.threads_alive >= 32: time.sleep(0.01)
+			self.threads_alive += 1
+			thread = threading.Thread(target=self.check_seed, args=(self.seed, ))
+			thread.start()
+			self.seed += 1
+		while self.threads_alive > 0:
+			# waiting for the threads...
+			time.sleep(0.1)
+		end_time = datetime.datetime.now()
+		diff = (end_time - start_time).total_seconds()
+		ms_per_seed = 1000 * diff / (self.end_seed - self.start_seed)
+		print(f"Total time (seconds): {diff}")
+		print(f"Average ms per seed: {ms_per_seed}")
+		print(f"Average seeds per second: {1000/ms_per_seed}")
+	def check_seed(self, seed: int):
+		if self.seed % 10000 == 0: print(f"[checked {self.seed} seeds]")
+		# make world
+		world = MCWorld(seed, 0)
+		# check the seed
+		valid = self.is_seed_good(world)
+		if valid:
+			# save this!
+			f = open("seeds.txt", "a")
+			f.write(f"\n\n\n\nFound {self.confirm} for seed: {self.seed}\n")
+			f.close()
+		# we are done
+		self.threads_alive -= 1
+	def is_seed_good(self, world: MCWorld) -> bool:
+		return False

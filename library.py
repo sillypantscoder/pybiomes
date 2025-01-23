@@ -154,13 +154,32 @@ class MCWorld:
 	def __del__(self):
 		self.discard()
 
+seed_finder_queues: "dict[int, multiprocessing.Queue[int]]" = {}
+seed_finder_cancellation_queues: "dict[int, multiprocessing.Queue[int]]" = {}
+
+def _watch_seedfinder_queue(seedfinder: "SeedFinder"):
+	while not seedfinder.ended:
+		time.sleep(0.5)
+		if seed_finder_queues[seedfinder.id].empty(): continue
+		seed = seed_finder_queues[seedfinder.id].get(True, 1)
+		seedfinder.checkpoints_hit += 1
+		print(f"[finished checking seed: {seed}, " +
+			f"probably about {round(100*(seedfinder.checkpoints_hit/seedfinder.checkpoints_total), 1)}% done?]")
+
 class SeedFinder:
 	def __init__(self, start_seed: int, end_seed: int):
 		self.start_seed = start_seed
 		self.end_seed = end_seed
 		self.confirm = "something"
-		self.seeds_checked = 0
-		self.seeds_checked_checkpoint = 0
+		self.stop_once_found = False
+		self.checkpoints_amt = 20000
+		self.checkpoints_total = round((self.end_seed - self.start_seed) / self.checkpoints_amt)
+		self.checkpoints_hit = 0
+		self.ended = False
+		self.id = max([0, *seed_finder_queues.keys()]) + 1
+		seed_finder_queues[self.id] = multiprocessing.Queue()
+		seed_finder_cancellation_queues[self.id] = multiprocessing.Queue()
+		threading.Thread(target=_watch_seedfinder_queue, name=f"queue_watcher_{self.id}", args=(self, )).start()
 	def run(self):
 		start_time = datetime.datetime.now()
 		# Make seed list
@@ -170,9 +189,13 @@ class SeedFinder:
 			seeds.append(seed)
 			seed += 1
 		# Run all the checkers
-		pool = multiprocessing.Pool(processes=14)
-		pool.map(self.check_seed, seeds)
+		pool = multiprocessing.Pool(processes=8)
+		try:
+			pool.map(self.check_seed, seeds)
+		except KeyboardInterrupt:
+			print("Stopping early due to KeyboardInterrupt")
 		pool.close()
+		self.ended = True
 		# Times
 		end_time = datetime.datetime.now()
 		diff = (end_time - start_time).total_seconds()
@@ -181,6 +204,7 @@ class SeedFinder:
 		print(f"Average ms per seed: {ms_per_seed}")
 		print(f"Average seeds per second: {1000/ms_per_seed}")
 	def check_seed(self, seed: int):
+		if not seed_finder_cancellation_queues[self.id].empty(): return
 		# make world
 		world = MCWorld(seed, 0)
 		# check the seed
@@ -196,49 +220,15 @@ class SeedFinder:
 			f.write(f"data: {valid}")
 			f.close()
 			print(f"[found result for seed: {seed}]")
+			if self.stop_once_found:
+				seed_finder_cancellation_queues[self.id].put(seed)
 		# seed checkpoints
-		if seed % 20000 == 0: print(f"[finished checking seed: {seed}, probably about {round(100*(seed - self.start_seed)/(self.end_seed - self.start_seed))}% done?]")
+		if seed % self.checkpoints_amt == 0:
+			seed_finder_queues[self.id].put(seed)
+			# print(f"[finished checking seed: {seed}, probably about {round(100*(seed - self.start_seed)/(self.end_seed - self.start_seed), 1)}% done?]")
 	def is_seed_good(self, world: MCWorld) -> str | None:
 		return None
-
-
-class _SeedFinder_Old: # type: ignore
-	def __init__(self, start_seed: int, end_seed: int):
-		self.start_seed = start_seed
-		self.seed = start_seed
-		self.end_seed = end_seed
-		self.confirm = "something"
-		self.threads_alive = 0
-	def run(self):
-		start_time = datetime.datetime.now()
-		while self.seed <= self.end_seed:
-			# We don't want too many threads. (That might cause problems.)
-			while self.threads_alive >= 32: time.sleep(0.01)
-			self.threads_alive += 1
-			thread = threading.Thread(target=self.check_seed, args=(self.seed, ))
-			thread.start()
-			self.seed += 1
-		while self.threads_alive > 0:
-			# waiting for the threads...
-			time.sleep(0.1)
-		end_time = datetime.datetime.now()
-		diff = (end_time - start_time).total_seconds()
-		ms_per_seed = 1000 * diff / (self.end_seed - self.start_seed)
-		print(f"Total time (seconds): {diff}")
-		print(f"Average ms per seed: {ms_per_seed}")
-		print(f"Average seeds per second: {1000/ms_per_seed}")
-	def check_seed(self, seed: int):
-		if self.seed % 10000 == 0: print(f"[checked {self.seed} seeds]")
-		# make world
-		world = MCWorld(seed, 0)
-		# check the seed
-		valid = self.is_seed_good(world)
-		if valid:
-			# save this!
-			f = open("seeds.txt", "a")
-			f.write(f"\n\n\n\nFound {self.confirm} for seed: {self.seed}\n")
-			f.close()
-		# we are done
-		self.threads_alive -= 1
-	def is_seed_good(self, world: MCWorld) -> bool:
-		return False
+	def __del__(self):
+		self.checkpoints_total = 0
+		if self.id in seed_finder_queues.keys():
+			del seed_finder_queues[self.id]

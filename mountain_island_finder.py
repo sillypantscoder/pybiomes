@@ -31,11 +31,11 @@ class MountainIslandSeedFinder(mc.SeedFinder):
 				validity += 0.25
 				j = True
 		if j: validity += 3
-		if validity >= 2.5:
+		if validity >= 3:
 			return f"Validity: {validity}"
 		else: return None
 
-seed =     15000000
-end_seed = 20000000
+seed =     110000000
+end_seed = 130000000
 finder = MountainIslandSeedFinder(seed, end_seed)
 finder.run()

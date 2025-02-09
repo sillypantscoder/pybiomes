@@ -4,7 +4,7 @@ import threading
 import typing
 import math
 
-seed = 2845528
+seed = 10203149
 
 # make image
 img_size = 600

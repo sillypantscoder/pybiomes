@@ -2,13 +2,14 @@ import library as mc
 
 not_ocean_dist = 150
 not_ocean_positions: list[mc.PosXZ] = []
-is_ocean_dist = 350
+is_ocean_dist = [300, 350, 400]
 is_ocean_positions: list[mc.PosXZ] = []
 for x in [-1, 0, 1]:
 	for z in [-1, 0, 1]:
 		not_ocean_positions.append(mc.PosXZ(x*not_ocean_dist, z*not_ocean_dist))
 		if x == 0 and z == 0: continue
-		is_ocean_positions.append(mc.PosXZ(x*is_ocean_dist, z*is_ocean_dist))
+		for d in is_ocean_dist:
+			is_ocean_positions.append(mc.PosXZ(x * d, z * d))
 
 class MountainIslandSeedFinder(mc.SeedFinder):
 	def __init__(self, start_seed: int, end_seed: int):
@@ -20,7 +21,7 @@ class MountainIslandSeedFinder(mc.SeedFinder):
 		for pos in is_ocean_positions:
 			biome = world.getBiomeAt(pos)
 			if "ocean" not in biome:
-				validity -= 1.5
+				validity -= 0.5
 		# biomes that should not be ocean
 		j = False
 		for pos in not_ocean_positions:
@@ -31,11 +32,12 @@ class MountainIslandSeedFinder(mc.SeedFinder):
 				validity += 0.25
 				j = True
 		if j: validity += 3
-		if validity >= 3:
+		if validity >= 2.5:
 			return f"Validity: {validity}"
 		else: return None
 
-seed =     110000000
-end_seed = 130000000
-finder = MountainIslandSeedFinder(seed, end_seed)
-finder.run()
+if __name__ == "__main__":
+	seed =      960000000
+	end_seed = 1000000000
+	finder = MountainIslandSeedFinder(seed, end_seed)
+	finder.run()

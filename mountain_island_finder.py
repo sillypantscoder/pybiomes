@@ -37,7 +37,7 @@ class MountainIslandSeedFinder(mc.SeedFinder):
 		else: return None
 
 if __name__ == "__main__":
-	seed =      960000000
-	end_seed = 1000000000
+	seed =     1160000000
+	end_seed = 1200000000
 	finder = MountainIslandSeedFinder(seed, end_seed)
 	finder.run()

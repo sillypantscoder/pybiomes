@@ -158,7 +158,7 @@ seed_finder_queues: "dict[int, multiprocessing.Queue[int]]" = {}
 seed_finder_cancellation_queues: "dict[int, multiprocessing.Queue[int]]" = {}
 
 # seeds/second per thread
-seed_checking_rate = 850
+seed_checking_rate = 995
 
 processes = 3
 

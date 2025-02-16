@@ -5,7 +5,6 @@ import inspect
 import json
 import math
 import time
-import threading
 
 # FOR PARENT PROCESSES
 
@@ -22,16 +21,16 @@ class Copiable:
 		raise RuntimeError("runTask method in copiable object needs to be overridden. Data: " + repr(data))
 
 class Process:
-	def __init__(self, clazz: typing.Type[Copiable], tasks: list[str], on_ended: "typing.Callable[[ Process ], None]"):
-		self.process = subprocess.Popen([sys.executable, __file__, get_caller_file_path(), clazz.__name__, json.dumps(tasks)])
-		self.on_ended = on_ended
-		self.watcher_thread = threading.Thread(target=self.watch, args=())
-		self.watcher_thread.start()
-	def watch(self):
-		time.sleep(0.5)
-		while self.process.poll() == None:
-			time.sleep(0.1)
-		self.on_ended(self)
+	def __init__(self, clazz: typing.Type[Copiable] | str, tasks: list[str]):
+		classname = clazz if isinstance(clazz, str) else clazz.__name__
+		self.process = subprocess.Popen([sys.executable, __file__, get_caller_file_path(), classname], stdin=subprocess.PIPE)
+		if self.process.stdin == None: raise ValueError("it doesn't exist ?????")
+		taskData = json.dumps(tasks).encode("UTF-8") + b"\n\n"
+		# print("Task data:", repr(taskData))
+		self.process.stdin.write(taskData)
+		self.process.stdin.flush()
+	def is_alive(self):
+		return self.process.poll() == None
 	def wait(self):
 		self.process.wait()
 	def __del__(self):
@@ -39,34 +38,45 @@ class Process:
 			self.process.kill()
 		self.process.wait()
 
-def pool(clazz: typing.Type[Copiable], tasks: list[str], progress_callback: typing.Callable[[ int, int ], None], max_processes: int = 3):
+def pool(clazz: typing.Type[Copiable] | str, tasks: list[str], progress_callback: typing.Callable[[ int, int, int ], None], max_processes: int = 3):
 	chunks: list[list[str]] = []
-	chunk_size = math.ceil(len(tasks) / max_processes)
-	chunk_size = 5
+	chunk_size = math.ceil(len(tasks) / (max_processes * 10))
+	chunk_size = 10000
 	for t in tasks:
 		if len(chunks) == 0 or len(chunks[-1]) >= chunk_size:
 			chunks.append([])
 		chunks[-1].append(t)
 	totalChunks = len(chunks)
 	completed = 0
+	progress_callback(chunk_size, completed, totalChunks)
 	# Run one process for each chunk
 	processes: list[Process] = []
-	def make_finish(chunk: list[str]):
-		def finish(p: Process):
-			nonlocal completed
-			processes.remove(p)
-			# Progress
-			completed += 1
-			progress_callback(completed, totalChunks)
-		return finish
+	def poll_processes(target_processes: int):
+		rm: list[Process] = []
+		for p in processes:
+			if not p.is_alive():
+				rm.append(p)
+		for p in rm: finish(p)
+		# print("[", len(processes), "/", target_processes, "]", sep="", end="", flush=True)
+	def finish(p: Process):
+		nonlocal completed
+		processes.remove(p)
+		# Progress
+		completed += 1
+		progress_callback(chunk_size, completed, totalChunks)
 	while len(chunks) > 0:
 		while len(processes) >= max_processes:
-			time.sleep(0.1)
+			time.sleep(1)
+			# Poll all the processes
+			poll_processes(max_processes)
 		chunk = chunks[0]
-		processes.append(Process(clazz, chunk, make_finish(chunk)))
+		processes.append(Process(clazz, chunk))
 		chunks.remove(chunk)
+		poll_processes(max_processes)
 	while len(processes) > 0:
-		time.sleep(0.1)
+		time.sleep(1)
+		# Poll all the processes
+		poll_processes(0)
 
 # FOR CHILD PROCESSES
 
@@ -81,7 +91,7 @@ def get_module(filepath: str):
 
 def runTasks(clazz: typing.Type[Copiable]):
 	obj = clazz.create()
-	tasks = json.loads(sys.argv[3])
+	tasks = json.loads(input())
 	for task in tasks:
 		obj.runTask(task)
 

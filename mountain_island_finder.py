@@ -15,29 +15,30 @@ class MountainIslandSeedFinder(mc.SeedFinder):
 	def __init__(self, start_seed: int, end_seed: int):
 		super().__init__(start_seed, end_seed)
 		self.confirm = "possible MOUNTAIN island spawn"
+	@staticmethod
+	def create():
+		return MountainIslandSeedFinder(0, 0)
 	def is_seed_good(self, world: mc.MCWorld):
 		# biomes that should be ocean
 		validity = 0
-		for pos in is_ocean_positions:
-			biome = world.getBiomeAt(pos)
+		for biome in world.getBiomesAt(is_ocean_positions):
 			if "ocean" not in biome:
 				validity -= 0.5
 		# biomes that should not be ocean
 		j = False
-		for pos in not_ocean_positions:
-			biome = world.getBiomeAt(pos)
+		for biome in world.getBiomesAt(not_ocean_positions):
 			if "ocean" in biome:
 				validity -= 0.75
 			if biome == "jagged_peaks":
 				validity += 0.25
 				j = True
 		if j: validity += 3
-		if validity >= 2.5:
+		if validity >= 2.75:
 			return f"Validity: {validity}"
 		else: return None
 
 if __name__ == "__main__":
-	seed =     1160000000
-	end_seed = 1200000000
+	seed =     1400000000
+	end_seed = 1440000000
 	finder = MountainIslandSeedFinder(seed, end_seed)
 	finder.run()

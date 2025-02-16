@@ -17,4 +17,4 @@ if __name__ == "__main__":
 	p.wait()
 	multi.pool(Something, [
 		*"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	], lambda completed, total: print(f"Progress: {completed}/{total}"))
+	], lambda chunksize, completed, total: print(f"Progress: {completed}/{total}"))

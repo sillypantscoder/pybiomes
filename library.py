@@ -4,9 +4,8 @@ import math
 from intersecting_squares import get_intersecting_unit_squares as _get_intersecting_unit_squares
 import os
 import datetime
-import threading
-import multiprocessing
-import time
+import multiprocessing_alt as multi
+import random
 
 class BiomeFinderProcess(typing.TypedDict):
 	process: subprocess.Popen[bytes]
@@ -14,11 +13,12 @@ class BiomeFinderProcess(typing.TypedDict):
 
 class SubprocessManager:
 	def __init__(self):
-		fn = f"biome_finder_out_{round(os.times().elapsed*100)}.out"
+		managerID = random.randint(0, 100000000)
+		fn = f"biome_finder_out_{managerID}.out"
 		self.out_filename: str | None = fn
-		subprocess.run(["cp", "../example_find_biome_at.c", "./example_find_biome_at.c"], cwd=os.path.join(os.getcwd(), "cubiomes"))
-		subprocess.run(["gcc", "example_find_biome_at.c", "libcubiomes.a", "-fwrapv", "-lm", "-o", "../"+fn], cwd=os.path.join(os.getcwd(), "cubiomes"))
-		subprocess.run(["rm", "example_find_biome_at.c"], cwd=os.path.join(os.getcwd(), "cubiomes"))
+		subprocess.run(["cp", "../example_find_biome_at.c", f"./example_find_biome_at_{managerID}.c"], cwd=os.path.join(os.getcwd(), "cubiomes"))
+		subprocess.run(["gcc", f"example_find_biome_at_{managerID}.c", "libcubiomes.a", "-fwrapv", "-lm", "-o", "../"+fn], cwd=os.path.join(os.getcwd(), "cubiomes"))
+		subprocess.run(["rm", f"example_find_biome_at_{managerID}.c"], cwd=os.path.join(os.getcwd(), "cubiomes"))
 		# process list
 		self.processes: list[BiomeFinderProcess] = []
 	def getProcess(self):
@@ -41,10 +41,10 @@ class SubprocessManager:
 				# print(f"un-claimed process #{self.processes.index(p)+1}")
 	def __del__(self):
 		if self.out_filename == None: return
-		print(f"[deleting temporary out file]")
+		# print(f"[deleting temporary out file]")
 		os.remove(self.out_filename)
 		self.out_filename = None
-		print(f"[killing {len(self.processes)} processes]")
+		# print(f"[killing {len(self.processes)} processes]")
 		for p in self.processes:
 			proc = p["process"]
 			if proc.stdin == None: raise AssertionError("stdin is missing??? you have problems!")
@@ -104,6 +104,14 @@ class MCWorld:
 		biome = self.readline()
 		return biome.decode("UTF-8")
 
+	def getBiomesAt(self, positions: list[PosXZ]):
+		for pos in positions:
+			self.send(2)
+			self.send(pos.x)
+			self.send(pos.z)
+		biomes = [self.readline().decode("UTF-8") for _ in positions]
+		return biomes
+
 	def getSpawnPoint(self):
 		self.send(3)
 		x = int(self.readline())
@@ -154,11 +162,8 @@ class MCWorld:
 	def __del__(self):
 		self.discard()
 
-seed_finder_queues: "dict[int, multiprocessing.Queue[int]]" = {}
-seed_finder_cancellation_queues: "dict[int, multiprocessing.Queue[int]]" = {}
-
 # seeds/second per thread
-seed_checking_rate = 995
+assumed_seed_checking_rate = 1100
 
 processes = 3
 
@@ -169,64 +174,34 @@ def _fmt_time(total_seconds: float):
 	mins -= hrs * 60
 	return f"{hrs}h {mins}m {secs}s"
 
-def _watch_seedfinder_queue(seedfinder: "SeedFinder"):
-	while not seedfinder.ended:
-		time.sleep(0.5)
-		if seedfinder.ended or seedfinder.id not in seed_finder_queues:
-			print("Watcher thread exited")
-			return
-		if seed_finder_queues[seedfinder.id].empty(): continue
-		seed = seed_finder_queues[seedfinder.id].get(True, 1)
-		seedfinder.checkpoints_hit += 1
-		# find eta
-		seconds_elapsed = (datetime.datetime.now() - seedfinder.start_time).total_seconds()
-		seed_checking_rate = (seedfinder.checkpoints_hit * seedfinder.checkpoints_amt) / seconds_elapsed
-		seeds_left = (seedfinder.checkpoints_total - seedfinder.checkpoints_hit) * seedfinder.checkpoints_amt
-		total_seconds = seeds_left / seed_checking_rate
-		# print data
-		print(f"[finished checking seed: {seed}, " +
-			f"probably about {round(100*(seedfinder.checkpoints_hit/seedfinder.checkpoints_total), 2)}% done? " +
-			f"Speed: {round(seed_checking_rate)} seeds/second; ETA: {_fmt_time(total_seconds)}]")
+def _fmt_n(n: int) -> str:
+	return "{:,}".format(n).replace(",", " ")
 
-class SeedFinder:
+class SeedFinder(multi.Copiable):
 	def __init__(self, start_seed: int, end_seed: int):
 		self.start_seed = start_seed
 		self.end_seed = end_seed
 		self.stats()
 		self.start_time = datetime.datetime.now()
 		self.confirm = "something"
-		self.stop_once_found = False
-		self.checkpoints_amt = 80000
-		self.checkpoints_total = round((self.end_seed - self.start_seed) / self.checkpoints_amt) + 1
-		self.checkpoints_hit = 0
-		self.ended = False
-		self.id = max([0, *seed_finder_queues.keys()]) + 1
-		seed_finder_queues[self.id] = multiprocessing.Queue()
-		seed_finder_cancellation_queues[self.id] = multiprocessing.Queue()
-		threading.Thread(target=_watch_seedfinder_queue, name=f"queue_watcher_{self.id}", args=(self, )).start()
 	def stats(self):
 		amt = self.end_seed - self.start_seed
-		total_seconds = amt / (seed_checking_rate * processes)
-		print(f"{amt} seeds to check, expected time {_fmt_time(total_seconds)}")
+		if amt == 0: return
+		total_seconds = amt / (assumed_seed_checking_rate * processes)
+		print(f"{_fmt_n(amt)} seeds to check, expected time {_fmt_time(total_seconds)}")
 	def run(self):
 		self.start_time = datetime.datetime.now()
 		# Make seed list
-		seeds: list[int] = []
+		seeds: list[str] = []
 		seed = self.start_seed
 		while seed <= self.end_seed:
-			seeds.append(seed)
+			seeds.append(str(seed))
 			seed += 1
 		# Run all the checkers
-		pool = multiprocessing.Pool(processes=processes)
 		try:
-			pool.map(self.check_seed, seeds)
+			multi.pool(self.__class__.__name__, seeds, self.updateProgress, processes)
 		except KeyboardInterrupt:
-			print("Stopping early due to KeyboardInterrupt")
-		pool.close()
-		# Signal ended
-		self.ended = True
-		if self.id in seed_finder_queues.keys():
-			del seed_finder_queues[self.id]
+			print("\nStopping early due to KeyboardInterrupt! Output statistics are probably not accurate!")
 		# Times
 		end_time = datetime.datetime.now()
 		diff = (end_time - self.start_time).total_seconds()
@@ -237,13 +212,21 @@ class SeedFinder:
 		print(f"Average seeds per second per thread: {(1000/ms_per_seed)/processes}")
 		# Calculate new initial checking rate
 		per_thread = ((self.end_seed - self.start_seed) / processes) / diff
-		avg = (seed_checking_rate + per_thread) / 2
+		avg = (assumed_seed_checking_rate + per_thread) / 2
 		print(f"New avg checking rate: {avg}")
-	def check_seed(self, seed: int):
-		if self.id not in seed_finder_cancellation_queues.keys():
-			print("Aaaaa, seed finder was deleted!")
-			return
-		if not seed_finder_cancellation_queues[self.id].empty(): return
+	def updateProgress(self, chunk_size: int, completed: int, total: int):
+		# find eta
+		seconds_elapsed = (datetime.datetime.now() - self.start_time).total_seconds()
+		seed_checking_rate = (completed * chunk_size) / seconds_elapsed
+		if seed_checking_rate == 0: seed_checking_rate = assumed_seed_checking_rate * processes
+		seeds_left = (total - completed) * chunk_size
+		total_seconds = seeds_left / seed_checking_rate
+		# Print data
+		print(f"[lib reports {completed}/{total} x{chunk_size}; probably about {round(100*(completed/total), 2)}% done? " +
+			f"Speed: {round(seed_checking_rate)} seeds/second or {round(seed_checking_rate/processes)} seeds/second/process; ETA: {_fmt_time(total_seconds)}]",
+			end="\n", flush=True)
+	def runTask(self, data: str):
+		seed = int(data)
 		# make world
 		world = MCWorld(seed, 0)
 		# check the seed
@@ -254,19 +237,11 @@ class SeedFinder:
 			return
 		if valid != None:
 			# save this!
+			display = valid.replace("\n", "\n\t")
 			f = open("seeds.txt", "a")
 			f.write(f"\n\n\n\nFound {self.confirm} for seed: {seed}\n")
-			f.write(f"data: {valid}")
+			f.write(f"data:\n{display}")
 			f.close()
 			print(f"[found result for seed: {seed}]")
-			if self.stop_once_found:
-				seed_finder_cancellation_queues[self.id].put(seed)
-		# seed checkpoints
-		if seed % self.checkpoints_amt == 0:
-			if self.id not in seed_finder_cancellation_queues.keys():
-				print("Aaaaa, seed finder was deleted really fast!")
-				return
-			seed_finder_queues[self.id].put(seed)
-			# print(f"[finished checking seed: {seed}, probably about {round(100*(seed - self.start_seed)/(self.end_seed - self.start_seed), 1)}% done?]")
 	def is_seed_good(self, world: MCWorld) -> str | None:
 		return None

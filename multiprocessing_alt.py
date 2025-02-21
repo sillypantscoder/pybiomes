@@ -41,7 +41,7 @@ class Process:
 def pool(clazz: typing.Type[Copiable] | str, tasks: list[str], progress_callback: typing.Callable[[ int, int, int ], None], max_processes: int = 3):
 	chunks: list[list[str]] = []
 	chunk_size = math.ceil(len(tasks) / (max_processes * 10))
-	chunk_size = 10000
+	chunk_size = 50000
 	for t in tasks:
 		if len(chunks) == 0 or len(chunks[-1]) >= chunk_size:
 			chunks.append([])

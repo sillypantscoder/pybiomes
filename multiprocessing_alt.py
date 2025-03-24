@@ -5,6 +5,7 @@ import inspect
 import json
 import math
 import time
+import os
 
 # FOR PARENT PROCESSES
 
@@ -21,11 +22,12 @@ class Copiable:
 		raise RuntimeError("runTask method in copiable object needs to be overridden. Data: " + repr(data))
 
 class Process:
-	def __init__(self, clazz: typing.Type[Copiable] | str, tasks: list[str]):
+	def __init__(self, clazz: typing.Type[Copiable] | str, tasks: list[str] | tuple[int, int]):
 		classname = clazz if isinstance(clazz, str) else clazz.__name__
 		self.process = subprocess.Popen([sys.executable, __file__, get_caller_file_path(), classname], stdin=subprocess.PIPE)
 		if self.process.stdin == None: raise ValueError("it doesn't exist ?????")
 		taskData = json.dumps(tasks).encode("UTF-8") + b"\n\n"
+		if isinstance(tasks, tuple): taskData = f"[[RANGE{os.getpid()}: From {tasks[0]}, to {tasks[1]}]]".encode("UTF-8") + b"\n\n"
 		# print("Task data:", repr(taskData))
 		self.process.stdin.write(taskData)
 		self.process.stdin.flush()
@@ -78,6 +80,43 @@ def pool(clazz: typing.Type[Copiable] | str, tasks: list[str], progress_callback
 		# Poll all the processes
 		poll_processes(0)
 
+def pool_range(clazz: typing.Type[Copiable] | str, start: int, end: int, progress_callback: typing.Callable[[ int, int, int ], None], max_processes: int = 3):
+	chunks: list[tuple[int, int]] = []
+	chunk_size = 500000
+	for i in range(start, end, chunk_size):
+		chunks.append((i, i + chunk_size))
+	totalChunks = len(chunks)
+	completed = 0
+	progress_callback(chunk_size, completed, totalChunks)
+	# Run one process for each chunk
+	processes: list[Process] = []
+	def poll_processes(target_processes: int):
+		rm: list[Process] = []
+		for p in processes:
+			if not p.is_alive():
+				rm.append(p)
+		for p in rm: finish(p)
+		# print("[", len(processes), "/", target_processes, "]", sep="", end="", flush=True)
+	def finish(p: Process):
+		nonlocal completed
+		processes.remove(p)
+		# Progress
+		completed += 1
+		progress_callback(chunk_size, completed, totalChunks)
+	while len(chunks) > 0:
+		while len(processes) >= max_processes:
+			time.sleep(1)
+			# Poll all the processes
+			poll_processes(max_processes)
+		chunk = chunks[0]
+		processes.append(Process(clazz, chunk))
+		chunks.remove(chunk)
+		poll_processes(max_processes)
+	while len(processes) > 0:
+		time.sleep(1)
+		# Poll all the processes
+		poll_processes(0)
+
 # FOR CHILD PROCESSES
 
 def get_module(filepath: str):
@@ -89,11 +128,28 @@ def get_module(filepath: str):
 	spec.loader.exec_module(module)
 	return module
 
+def isRange(s: str) -> None | tuple[int, int]:
+	import re
+	expected = f"\\[\\[RANGE{os.getppid()}: From \\d+, to \\d+\\]\\]"
+	if re.fullmatch(expected, s):
+		nums = re.findall(r"(?<=From |, to )\d+", s)
+		return (int(nums[0]), int(nums[1]))
+	return None
+
 def runTasks(clazz: typing.Type[Copiable]):
 	obj = clazz.create()
-	tasks = json.loads(input())
-	for task in tasks:
-		obj.runTask(task)
+	data = input()
+	r = isRange(data)
+	if r:
+		taskRange = range(r[0], r[1])
+		# Run tasks
+		for task in taskRange:
+			obj.runTask(str(task))
+	else:
+		tasks: list[str] = json.loads(data)
+		# Run tasks
+		for task in tasks:
+			obj.runTask(task)
 
 if __name__ == "__main__":
 	module = get_module(sys.argv[1])

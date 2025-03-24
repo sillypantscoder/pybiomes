@@ -76,6 +76,11 @@ class Structure:
 	def __repr__(self):
 		return f"Structure({self.pos}, {self.typeID})"
 
+class AsyncBiomeSet:
+	def __init__(self, world: "MCWorld", n: int):
+		self.world = world
+		self.remaining = n
+
 class MCWorld:
 	def __init__(self, seed: int, dimension: typing.Literal[-1, 0, 1]):
 		self.p: subprocess.Popen[bytes] | None = manager.getProcess()
@@ -163,7 +168,7 @@ class MCWorld:
 		self.discard()
 
 # seeds/second per thread
-assumed_seed_checking_rate = 1100
+assumed_seed_checking_rate = 4850
 
 processes = 3
 
@@ -191,15 +196,9 @@ class SeedFinder(multi.Copiable):
 		print(f"{_fmt_n(amt)} seeds to check, expected time {_fmt_time(total_seconds)}")
 	def run(self):
 		self.start_time = datetime.datetime.now()
-		# Make seed list
-		seeds: list[str] = []
-		seed = self.start_seed
-		while seed <= self.end_seed:
-			seeds.append(str(seed))
-			seed += 1
 		# Run all the checkers
 		try:
-			multi.pool(self.__class__.__name__, seeds, self.updateProgress, processes)
+			multi.pool_range(self.__class__.__name__, self.start_seed, self.end_seed, self.updateProgress, processes)
 		except KeyboardInterrupt:
 			print("\nStopping early due to KeyboardInterrupt! Output statistics are probably not accurate!")
 		# Times
@@ -213,7 +212,8 @@ class SeedFinder(multi.Copiable):
 		# Calculate new initial checking rate
 		per_thread = ((self.end_seed - self.start_seed) / processes) / diff
 		avg = (assumed_seed_checking_rate + per_thread) / 2
-		print(f"New avg checking rate: {avg}")
+		rounded = round(avg / 50) * 50
+		print(f"New avg checking rate: {rounded}")
 	def updateProgress(self, chunk_size: int, completed: int, total: int):
 		# find eta
 		seconds_elapsed = (datetime.datetime.now() - self.start_time).total_seconds()

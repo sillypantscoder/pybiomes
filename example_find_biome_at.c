@@ -28,8 +28,8 @@ const char *stringifyBiome(int biome) {
 		case frozen_river: return "frozen_river";
 		case snowy_tundra: return "snowy_tundra";
 		case snowy_mountains: return "snowy_mountains";
-		case mushroom_fields: return "mushroom_fields";
-		case mushroom_field_shore: return "mushroom_field_shore";
+		case mushroom_fields: return "mushroom_island";
+		case mushroom_field_shore: return "mushroom_island";
 		case beach: return "beach";
 		case desert_hills: return "desert_hills";
 		case wooded_hills: return "wooded_hills";

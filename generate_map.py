@@ -4,7 +4,7 @@ import threading
 import typing
 import math
 
-seed = 10203149
+seed = 53711342
 
 # make image
 img_size = 600
@@ -46,6 +46,9 @@ def map_seed():
 			elif biome == "dark_forest": color = (128, 64, 0)
 			elif biome == "birch_forest": color = (180, 180, 230)
 			elif biome == "tall_birch_forest": color = (200, 200, 255)
+			elif biome == "desert": color = (230, 200, 0)
+			elif biome == "mangrove_swamp": color = (0, 100, 80)
+			elif biome == "dripstone_caves": color = (90, 80, 70)
 			elif biome not in unknown_biomes:
 				print(f"[unknown biome: {biome}]")
 				unknown_biomes.append(biome)
@@ -68,7 +71,11 @@ spawnPos = getSpawnPoint()
 
 def getStructures():
 	world = mc.MCWorld(seed, 0)
-	structures = world.getStructuresInRadius(mc.PosXZ(0, 0), img_size)
+	structures: list[mc.Structure] = []
+	structures.extend(world.getStructuresInRegion( 0,  0))
+	structures.extend(world.getStructuresInRegion(-1,  0))
+	structures.extend(world.getStructuresInRegion( 0, -1))
+	structures.extend(world.getStructuresInRegion(-1, -1))
 	world.discard()
 	return structures
 
@@ -144,4 +151,4 @@ while running:
 
 # discard
 
-del mc._out_file # type: ignore
+del mc.manager
